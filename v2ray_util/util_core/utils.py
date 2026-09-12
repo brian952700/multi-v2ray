@@ -308,7 +308,9 @@ def open_port(openport=-1):
             os.system("{}-restore -c < /etc/sysconfig/iptables".format(iptable_way)) 
         for port in port_set:
             iptables_open(iptable_way, str(port))
-    os.system("{}-save -c > /root/.iptables 2>/dev/null".format(iptable_way))
+    # Keep the IPv4 legacy path while separating IPv6 snapshots on Debian.
+    snapshot = '/root/.ip6tables' if iptable_way == 'ip6tables' else '/root/.iptables'
+    os.system("{0}-save -c > {1}.tmp && mv {1}.tmp {1}".format(iptable_way, snapshot))
 
 def random_email():
     domain = ['163', 'qq', 'sina', '126', 'gmail', 'outlook', 'icloud']
@@ -352,4 +354,3 @@ def readchar(prompt=""):
 
     print(ch)
     return ch.strip()
-

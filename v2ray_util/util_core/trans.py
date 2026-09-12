@@ -14,4 +14,3 @@ else:
     trans = gettext.translation('lang', resource_filename('v2ray_util', 'locale_i18n'), languages=['en_US'])
 trans.install()
 _ = trans.gettext
-

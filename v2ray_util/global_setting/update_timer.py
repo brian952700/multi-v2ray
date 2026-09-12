@@ -65,4 +65,3 @@ def manage():
         os.system("crontab -l|sed '/SHELL=/d;/{}/d' > crontab.txt && crontab crontab.txt && rm -f crontab.txt".format(run_type))
         print(ColorStr.green(_("close shedule task success")))
         restartCron()
-

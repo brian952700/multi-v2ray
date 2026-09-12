@@ -45,4 +45,3 @@ def manage(iptables_type=''):
                 print(ColorStr.red(_("input error!")))
         else:
             break
-

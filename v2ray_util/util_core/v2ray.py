@@ -36,6 +36,7 @@ class V2ray:
             print(ColorStr.green("{} {} success !".format(run_type, keyword)))
         else:
             print(ColorStr.red("{} {} fail !".format(run_type, keyword)))
+            raise RuntimeError('{} {} failed'.format(run_type, keyword))
 
     @staticmethod
     def run(command, keyword):
@@ -180,4 +181,3 @@ class V2ray:
         stream.StreamModifier().random_kcp()
         open_port()
         cls.restart()
-

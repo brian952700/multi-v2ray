@@ -2,7 +2,7 @@ name: Debian 13 compatibility
 
 on:
   push:
-    branches: [master, 'ci/debian13-compatibility']
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
@@ -142,7 +142,7 @@ jobs:
             fi
           fi
           BASH
-          docker run --rm --name "debian13-${SCENARIO}-${GITHUB_RUN_ID}" \
+          docker run --rm --cap-add NET_ADMIN --name "debian13-${SCENARIO}-${GITHUB_RUN_ID}" \
             --env SCENARIO \
             --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/source,readonly" \
             debian:13 bash /source/test-results/test.sh \
@@ -169,5 +169,3 @@ jobs:
           - NOT covered: fresh core installation, core configuration acceptance, proxy connectivity, Xray runtime, systemd, reboot persistence, firewall behavior, upgrades or uninstall.
           - Configuration generation mocks only firewall opening and service restart; passing is not a full Debian 13 certification.
           EOF
-
-
