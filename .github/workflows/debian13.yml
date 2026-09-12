@@ -1,0 +1,145 @@
+name: Debian 13 compatibility
+
+on:
+  push:
+    branches: [master, 'ci/debian13-compatibility']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    name: Debian 13 / ${{ matrix.scenario }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [source, installer-keep]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Test in an isolated Debian 13 container
+        shell: bash
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          docker pull debian:13
+          docker image inspect debian:13 > test-results/image.json
+          cat > test-results/test.sh <<'BASH'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          cat /etc/os-release
+          . /etc/os-release
+          test "$VERSION_ID" = 13
+          apt-get update
+          apt-get install -y ca-certificates curl python3 python3-pip python3-venv
+          python3 --version
+          python3 -c 'import sys; assert sys.version_info[:2] == (3, 13)'
+          cp -a /source /tmp/project
+          cd /tmp/project
+          bash -n v2ray.sh
+          bash -n go.sh
+
+          if [ "$SCENARIO" = source ]; then
+            # Install this checkout, not the independently published PyPI package.
+            python3 -m venv /opt/test-venv
+            export PATH="/opt/test-venv/bin:$PATH"
+            python -m pip install --upgrade pip setuptools wheel
+            python -m pip install --no-build-isolation .
+            python -m pip check
+            cd /tmp
+            python -m compileall -q /opt/test-venv/lib/python3.13/site-packages/v2ray_util
+            python - <<'PY'
+          import importlib.metadata
+          import json
+          import pathlib
+          import shutil
+          import uuid
+          from unittest.mock import patch
+          import v2ray_util
+          import v2ray_util.main as main
+          from v2ray_util.util_core.v2ray import V2ray
+          from v2ray_util.util_core.config import Config
+
+          package = pathlib.Path(v2ray_util.__file__).parent
+          assert '/opt/test-venv/' in str(package), package
+          print('Installed package:', package)
+          print('Version:', importlib.metadata.version('v2ray-util'))
+          pathlib.Path('/etc/v2ray_util').mkdir(parents=True, exist_ok=True)
+          shutil.copyfile(package / 'util_core/util.cfg', '/etc/v2ray_util/util.cfg')
+          pathlib.Path('/etc/v2ray').mkdir(parents=True, exist_ok=True)
+          assert Config().get_path('config_path') == '/etc/v2ray/config.json'
+          main.help()
+          # Exercise real template/configuration code. Network/firewall and service
+          # operations are excluded: a normal container does not boot systemd.
+          with patch('v2ray_util.util_core.v2ray.open_port'), patch.object(V2ray, 'restart'):
+              V2ray.new()
+          config = json.loads(pathlib.Path('/etc/v2ray/config.json').read_text())
+          assert config.get('outbounds'), 'Missing outbounds'
+          clients = []
+          for inbound in config['inbounds']:
+              if inbound.get('protocol') == 'vmess':
+                  assert 1000 <= int(inbound['port']) <= 65535
+                  clients.extend(inbound['settings']['clients'])
+          assert clients, 'No generated VMess clients'
+          for client in clients:
+              uuid.UUID(client['id'])
+              assert client['id'] != 'cc4f8d5b-967b-4557-a4b6-bde92965bc27'
+          print('PASS: installed checkout, imports, help and configuration generation')
+          PY
+          else
+            # Run the unmodified repository installer in keep mode. This tests its
+            # external Python/PyPI dependency chain, not the local Python source.
+            # It intentionally does not claim fresh core installation or systemd coverage.
+            timeout 600 bash ./v2ray.sh --keep --zh
+            test -x /usr/local/bin/v2ray
+            test -x /usr/local/bin/xray
+            test -s /etc/v2ray_util/util.cfg
+            python3 -m pip check
+            cd /tmp
+            python3 - <<'PY'
+          import importlib.metadata
+          import v2ray_util.main as main
+          from v2ray_util.util_core.config import Config
+          assert Config().get_data('lang') == 'zh'
+          print('PyPI version:', importlib.metadata.version('v2ray-util'))
+          main.help()
+          print('PASS: keep-mode installer postconditions and installed-package import')
+          PY
+          fi
+          BASH
+          docker run --rm --name "debian13-${SCENARIO}-${GITHUB_RUN_ID}" \
+            --env SCENARIO \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/source,readonly" \
+            debian:13 bash /source/test-results/test.sh \
+            2>&1 | tee "test-results/${SCENARIO}.log"
+
+      - name: Preserve diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian13-${{ matrix.scenario }}-${{ github.run_attempt }}
+          path: test-results/
+          retention-days: 14
+
+      - name: Explain coverage
+        if: always()
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          Debian 13 amd64 container checks; Python version and image digest are logged.
+
+          - source: installs the current checkout in a venv; checks imports, help and generated JSON/UUID/ports.
+          - installer-keep: runs the unchanged keep-mode installer and checks its installed artifacts and imports.
+          - External dependency versions are unpinned intentionally; failures may reflect upstream changes or network errors. Inspect logs.
+          - NOT covered: fresh core installation, core configuration acceptance, proxy connectivity, Xray runtime, systemd, reboot persistence, firewall behavior, upgrades or uninstall.
+          - Configuration generation mocks only firewall opening and service restart; passing is not a full Debian 13 certification.
+          EOF
+
