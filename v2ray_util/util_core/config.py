@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import pkg_resources
+from v2ray_util.resources import resource_filename
 import configparser
 from v2ray_util import run_type
 
@@ -12,8 +12,8 @@ class Config:
     def __init__(self):
         self.config = configparser.ConfigParser()
         self.config_path = CONF_FILE
-        self.data_path = pkg_resources.resource_filename('v2ray_util', DATA_FILE)
-        self.json_path = pkg_resources.resource_filename('v2ray_util', "json_template")
+        self.data_path = resource_filename('v2ray_util', DATA_FILE)
+        self.json_path = resource_filename('v2ray_util', "json_template")
         self.config.read(self.config_path)
 
     def get_path(self, key):
@@ -27,3 +27,4 @@ class Config:
     def set_data(self, key, value):
         self.config.set('data', key, value)
         self.config.write(open(self.config_path, "w"))
+

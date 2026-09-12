@@ -8,7 +8,7 @@ import socket
 import string
 import random
 import termios
-import pkg_resources
+from v2ray_util.resources import resource_filename
 import urllib.request
 from enum import Enum, unique
 
@@ -96,9 +96,9 @@ def get_ip():
     """
     my_ip = ""
     try:
-        my_ip = urllib.request.urlopen('http://api.ipify.org').read()
+        my_ip = urllib.request.urlopen('https://api.ipify.org', timeout=10).read()
     except Exception:
-        my_ip = urllib.request.urlopen('http://icanhazip.com').read()
+        my_ip = urllib.request.urlopen('https://icanhazip.com', timeout=10).read()
     return bytes.decode(my_ip).strip()
 
 def port_is_use(port):
@@ -223,7 +223,7 @@ def gen_cert(domain, cert_type, email=""):
 
 def calcul_iptables_traffic(port, ipv6=False):
     network = "1" if ipv6 else ""
-    traffic_result = os.popen("bash {0} {1} {2}".format(pkg_resources.resource_filename("v2ray_util", "global_setting/calcul_traffic.sh"), str(port), network)).readlines()
+    traffic_result = os.popen("bash {0} {1} {2}".format(resource_filename("v2ray_util", "global_setting/calcul_traffic.sh"), str(port), network)).readlines()
     if traffic_result:
         traffic_list = traffic_result[0].split()
         upload_traffic = bytes_2_human_readable(int(traffic_list[0]), 2)
@@ -352,3 +352,4 @@ def readchar(prompt=""):
 
     print(ch)
     return ch.strip()
+

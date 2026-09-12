@@ -2,14 +2,22 @@
 # -*- coding: utf-8 -*-
 from setuptools import setup, find_packages
 
-import v2ray_util
+import ast
+from pathlib import Path
+
+# Read the version without importing translations or runtime configuration.
+version = next(ast.literal_eval(node.value)
+               for node in ast.parse(Path('v2ray_util/__init__.py').read_text()).body
+               if isinstance(node, ast.Assign)
+               and any(isinstance(target, ast.Name) and target.id == '__version__'
+                       for target in node.targets))
 
 with open("README.md", "r", encoding='UTF-8') as fh:
     long_description = fh.read()
 
 setup(
     name='v2ray-util',
-    version=v2ray_util.__version__,
+    version=version,
     description="a tool to manage v2ray config json",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -42,5 +50,8 @@ setup(
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
     ]
 )
+

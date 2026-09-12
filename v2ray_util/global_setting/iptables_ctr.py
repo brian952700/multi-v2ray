@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import subprocess
-import pkg_resources
+from v2ray_util.resources import resource_filename
 
 from ..util_core.loader import Loader
 from ..util_core.utils import ColorStr, calcul_iptables_traffic, readchar
@@ -39,9 +39,10 @@ def manage(iptables_type=''):
         elif choice == "2":
             port = input(_("please input reset port:"))
             if port and port.isnumeric():
-                subprocess.call("bash {0} {1}".format(pkg_resources.resource_filename(__name__, "clean_traffic.sh"), str(port)), shell=True)
+                subprocess.call("bash {0} {1}".format(resource_filename(__name__, "clean_traffic.sh"), str(port)), shell=True)
                 print(ColorStr.green(_("reset success!")))
             else:
                 print(ColorStr.red(_("input error!")))
         else:
             break
+

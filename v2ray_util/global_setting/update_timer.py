@@ -34,7 +34,7 @@ def planUpdate():
     else:
         local_time = 3
     os.system('echo "SHELL=/bin/bash" >> crontab.txt && echo "$(crontab -l)" >> crontab.txt')
-    os.system('echo "0 {} * * * bash <(curl -L -s https://multi.netlify.app/go.sh) {}| tee -a /root/{}Update.log" >> crontab.txt'.format(local_time,"-x" if run_type == "xray" else "",run_type))
+    os.system('echo "0 {} * * * bash <(curl -L -s https://raw.githubusercontent.com/brian952700/multi-v2ray/master/go.sh) {}| tee -a /root/{}Update.log" >> crontab.txt'.format(local_time,"-x" if run_type == "xray" else "",run_type))
     os.system("crontab crontab.txt && rm -f crontab.txt")
     restartCron()
     print(ColorStr.green(_("success open schedule update task!")))
@@ -65,3 +65,4 @@ def manage():
         os.system("crontab -l|sed '/SHELL=/d;/{}/d' > crontab.txt && crontab crontab.txt && rm -f crontab.txt".format(run_type))
         print(ColorStr.green(_("close shedule task success")))
         restartCron()
+
