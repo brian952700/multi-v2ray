@@ -10,7 +10,11 @@ import threading
 import time
 
 core = sys.argv[1]
+client_core = sys.argv[2] if len(sys.argv) > 2 else core
 server = json.loads(pathlib.Path('/etc/' + core + '/config.json').read_text())
+if client_core == 'v2ray' and core == 'xray':
+    from v2ray_util.util_core.xray_compat import legacy_view
+    server = legacy_view(server)
 inbound = server['inbounds'][0]
 with tempfile.TemporaryDirectory() as directory:
     root = pathlib.Path(directory)
@@ -29,7 +33,7 @@ with tempfile.TemporaryDirectory() as directory:
     client_config = root / 'client.json'
     client_config.write_text(json.dumps(config))
     with (root / 'client.log').open('w+') as log:
-        client = subprocess.Popen(['/usr/bin/' + core + '/' + core, 'run', '-c', str(client_config)],
+        client = subprocess.Popen(['/usr/bin/' + client_core + '/' + client_core, 'run', '-c', str(client_config)],
                                   stdout=log, stderr=log)
         try:
             result = None
@@ -44,7 +48,7 @@ with tempfile.TemporaryDirectory() as directory:
                 time.sleep(1)
             assert result.returncode == 0, result.stderr
             assert result.stdout == 'multi-v2ray-debian13-ok', result.stdout
-            print('PASS: real HTTP traffic via SOCKS -> VMess -> generated server')
+            print('PASS: real HTTP traffic via %s client -> %s server' % (client_core, core))
         finally:
             client.terminate()
             try:

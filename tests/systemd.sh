@@ -24,12 +24,18 @@ xray new
 systemctl is-active --quiet xray
 /usr/bin/xray/xray run -test -c /etc/xray/config.json
 /opt/multi-v2ray/venv/bin/python /source/tests/proxy_smoke.py xray
+/opt/multi-v2ray/venv/bin/python /source/tests/proxy_smoke.py xray v2ray
 xray stop
 test "$(systemctl is-active xray)" = inactive
 xray start
 xray restart
 systemctl is-active --quiet xray
 iptables -S INPUT
+sha256sum /etc/v2ray/config.json /etc/xray/config.json > /tmp/both-configs.sha256
+v2ray update
+xray update
+sha256sum --check /tmp/both-configs.sha256
+systemctl is-active --quiet v2ray xray
 test -s /root/.iptables
 systemctl start multi-v2ray-iptables.service
 systemctl is-active --quiet multi-v2ray-iptables.service
