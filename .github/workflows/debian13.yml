@@ -97,9 +97,7 @@ jobs:
           PY
             python /source/tests/test_features.py -v
           elif [ "$SCENARIO" = installer-keep ]; then
-            # Run the unmodified repository installer in keep mode. This tests its
-            # external Python/PyPI dependency chain, not the local Python source.
-            # It intentionally does not claim fresh core installation or systemd coverage.
+            # Install this checkout and verify keep-mode configuration preservation.
             timeout 600 bash ./v2ray.sh --keep --zh
             test -x /usr/local/bin/v2ray
             test -x /usr/local/bin/xray
@@ -171,9 +169,11 @@ jobs:
           Debian 13 amd64 container checks; Python version and image digest are logged.
 
           - source: installs the current checkout in a venv; checks imports, help and generated JSON/UUID/ports.
-          - installer-keep: runs the unchanged keep-mode installer and checks its installed artifacts and imports.
+          - installer-keep: installs this checkout twice and verifies both core configurations remain unchanged.
+          - core-v2ray/core-xray: install latest stable cores, validate generated configurations, exercise start/restart/stop and real proxy traffic.
+          - systemd: separate Debian container boots systemd, installs both cores, checks service lifecycle, firewall restoration, container restart and uninstall.
           - External dependency versions are unpinned intentionally; failures may reflect upstream changes or network errors. Inspect logs.
-          - NOT covered: fresh core installation, core configuration acceptance, proxy connectivity, Xray runtime, systemd, reboot persistence, firewall behavior, upgrades or uninstall.
+          - NOT covered: a real VPS kernel reboot, every external client, provider firewalls, certificate issuance or every protocol combination.
           - Configuration generation mocks only firewall opening and service restart; passing is not a full Debian 13 certification.
           EOF
 

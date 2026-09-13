@@ -5,6 +5,8 @@ import sys
 import uuid
 import time
 import subprocess
+import tempfile
+import urllib.request
 from v2ray_util.resources import resource_filename
 from functools import wraps
 from v2ray_util import run_type
@@ -99,10 +101,19 @@ class V2ray:
             sys.exit(0)
         if os.path.exists("/.dockerenv"):
             V2ray.stop()
-        subprocess.Popen("curl -Ls https://raw.githubusercontent.com/brian952700/multi-v2ray/master/go.sh -o temp.sh", shell=True).wait()
-        subprocess.Popen("bash temp.sh {} {} && rm -f temp.sh".format("-x" if run_type == "xray" else "", "--version {}".format(version) if version else ""), shell=True).wait()
-        if os.path.exists("/.dockerenv"):
-            V2ray.start()
+        with tempfile.TemporaryDirectory() as directory:
+            script = '/opt/multi-v2ray/go.sh'
+            if not os.path.isfile(script):
+                script = os.path.join(directory, 'go.sh')
+                urllib.request.urlretrieve('https://raw.githubusercontent.com/brian952700/multi-v2ray/master/go.sh', script)
+            command = ['bash', script]
+            if run_type == 'xray':
+                command.append('-x')
+            if version:
+                command.extend(['--version', str(version)])
+            subprocess.check_call(command)
+        if os.path.isfile('/etc/{}/config.json'.format(run_type)):
+            V2ray.restart()
 
     @staticmethod
     def cleanLog():

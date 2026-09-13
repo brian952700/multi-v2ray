@@ -5,7 +5,7 @@ export DEBIAN_FRONTEND=noninteractive
 trap 'systemctl --no-pager --full status v2ray xray || true; journalctl --no-pager -n 100 || true' ERR
 cp -a /source /tmp/project
 cd /tmp/project
-timeout 600 bash v2ray.sh --zh
+timeout 600 bash -x ./v2ray.sh --zh
 systemctl is-active --quiet v2ray
 systemctl is-enabled --quiet v2ray
 systemctl is-enabled --quiet multi-v2ray-iptables.service
