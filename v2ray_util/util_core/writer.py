@@ -66,6 +66,11 @@ class Writer:
         '''
         save v2ray config.json
         '''
+        from v2ray_util import run_type
+        if run_type == 'xray':
+            from .xray_compat import prepare_config
+            prepare_config(self.path, self.config)
+            return
         json_dump=json.dumps(self.config, indent=2)
         with open(self.path, 'w') as writer:
             writer.writelines(json_dump)

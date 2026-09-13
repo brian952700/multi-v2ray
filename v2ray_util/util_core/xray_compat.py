@@ -60,16 +60,17 @@ def legacy_view(config):
     return result
 
 
-def prepare_config(path='/etc/xray/config.json'):
+def prepare_config(path='/etc/xray/config.json', config=None):
     binary = '/usr/bin/xray/xray'
     version = subprocess.check_output([binary, 'version'], text=True)
     match = re.search(r'Xray (\d+)\.(\d+)\.(\d+)', version)
-    if not match or tuple(map(int, match.groups())) < (26, 3, 27):
+    modern = match and tuple(map(int, match.groups())) >= (26, 3, 27)
+    if not modern and config is None:
         return
     target = Path(path)
-    original = json.loads(target.read_text())
-    converted = modern_config(original)
-    if converted == original:
+    original = json.loads(target.read_text()) if config is None else config
+    converted = modern_config(original) if modern else original
+    if converted == original and config is None:
         return
     # Validate the entire candidate with the installed core before replacing it.
     with tempfile.NamedTemporaryFile(mode='w', dir=target.parent, suffix='.json', delete=False) as temp:

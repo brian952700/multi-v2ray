@@ -96,6 +96,7 @@ jobs:
           print('PASS: installed checkout, imports, help and configuration generation')
           PY
             python /source/tests/test_features.py -v
+            python /source/tests/test_xray_compat.py -v
           elif [ "$SCENARIO" = installer-keep ]; then
             # Install this checkout and verify keep-mode configuration preservation.
             timeout 600 bash ./v2ray.sh --keep --zh
@@ -212,7 +213,7 @@ jobs:
             sleep 1
           done
           docker exec debian13-systemd systemctl is-active --quiet v2ray xray multi-v2ray-iptables
-          docker exec debian13-systemd bash -c 'cd /tmp/project && bash v2ray.sh --remove && test ! -e /opt/multi-v2ray && test ! -e /usr/local/bin/v2ray && test ! -e /usr/local/bin/xray'
+          docker exec debian13-systemd bash -c 'cd /opt/test-project && bash v2ray.sh --remove && test ! -e /opt/multi-v2ray && test ! -e /usr/local/bin/v2ray && test ! -e /usr/local/bin/xray'
       - name: Save systemd diagnostics and remove test container
         if: always()
         shell: bash
