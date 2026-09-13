@@ -35,6 +35,7 @@ jobs:
           cat > test-results/test.sh <<'BASH'
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
+          trap 'test ! -f /.run.log || cat /.run.log' ERR
           cat /etc/os-release
           . /etc/os-release
           test "$VERSION_ID" = 13
@@ -94,6 +95,7 @@ jobs:
               assert client['id'] != 'cc4f8d5b-967b-4557-a4b6-bde92965bc27'
           print('PASS: installed checkout, imports, help and configuration generation')
           PY
+            python /source/tests/test_features.py -v
           elif [ "$SCENARIO" = installer-keep ]; then
             # Run the unmodified repository installer in keep mode. This tests its
             # external Python/PyPI dependency chain, not the local Python source.
@@ -131,11 +133,16 @@ jobs:
             export PATH="/opt/multi-v2ray/venv/bin:$PATH"
             cd /tmp
             timeout 60 /usr/local/bin/"$core" new
-            /usr/bin/"$core"/"$core" run -test -c /etc/"$core"/config.json
+            if [ "$core" = xray ]; then
+              /usr/bin/xray/xray run -test -c /etc/xray/config.json
+            else
+              /usr/bin/v2ray/v2ray test -c /etc/v2ray/config.json
+            fi
             pgrep -f "^/usr/bin/$core/$core( |$)"
             timeout 30 /usr/local/bin/"$core" restart
             pgrep -f "^/usr/bin/$core/$core( |$)"
             timeout 30 /usr/local/bin/"$core" info
+            python /source/tests/proxy_smoke.py "$core"
             timeout 30 /usr/local/bin/"$core" stop
             if pgrep -f "^/usr/bin/$core/$core( |$)"; then
               echo 'Core still running after stop'; exit 1
@@ -169,3 +176,53 @@ jobs:
           - NOT covered: fresh core installation, core configuration acceptance, proxy connectivity, Xray runtime, systemd, reboot persistence, firewall behavior, upgrades or uninstall.
           - Configuration generation mocks only firewall opening and service restart; passing is not a full Debian 13 certification.
           EOF
+
+  systemd:
+    name: Debian 13 / systemd integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Boot isolated Debian systemd and exercise installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          cat > test-results/Dockerfile <<'EOF'
+          FROM debian:13
+          ENV DEBIAN_FRONTEND=noninteractive
+          RUN apt-get update && apt-get install -y systemd systemd-sysv dbus curl ca-certificates
+          STOPSIGNAL SIGRTMIN+3
+          CMD ["/bin/bash", "-c", "rm -f /.dockerenv; exec /sbin/init"]
+          EOF
+          docker build -t multi-v2ray-systemd -f test-results/Dockerfile .
+          docker run -d --name debian13-systemd --privileged --cgroupns=private \
+            --tmpfs /run --tmpfs /run/lock --env container=docker \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/source,readonly" multi-v2ray-systemd
+          for attempt in $(seq 1 30); do
+            if docker exec debian13-systemd test -d /run/systemd/system; then break; fi
+            sleep 1
+          done
+          docker exec debian13-systemd bash /source/tests/systemd.sh 2>&1 | tee test-results/systemd.log
+          docker restart debian13-systemd
+          for attempt in $(seq 1 30); do
+            if docker exec debian13-systemd systemctl is-active --quiet v2ray xray multi-v2ray-iptables; then break; fi
+            sleep 1
+          done
+          docker exec debian13-systemd systemctl is-active --quiet v2ray xray multi-v2ray-iptables
+          docker exec debian13-systemd bash -c 'cd /tmp/project && bash v2ray.sh --remove && test ! -e /opt/multi-v2ray && test ! -e /usr/local/bin/v2ray && test ! -e /usr/local/bin/xray'
+      - name: Save systemd diagnostics and remove test container
+        if: always()
+        shell: bash
+        run: |
+          docker logs debian13-systemd > test-results/boot.log 2>&1 || true
+          docker exec debian13-systemd journalctl --no-pager -n 200 > test-results/journal.log 2>&1 || true
+          docker rm -f debian13-systemd || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: debian13-systemd-${{ github.run_attempt }}
+          path: test-results/
+          retention-days: 14

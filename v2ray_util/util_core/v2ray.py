@@ -123,6 +123,9 @@ class V2ray:
 
     @classmethod
     def restart(cls):
+        if run_type == 'xray':
+            from .xray_compat import prepare_config
+            prepare_config()
         if os.path.exists("/.dockerenv"):
             V2ray.stop()
             V2ray.start()
@@ -131,12 +134,15 @@ class V2ray:
 
     @classmethod
     def start(cls):
+        if run_type == 'xray':
+            from .xray_compat import prepare_config
+            prepare_config()
         if os.path.exists("/.dockerenv"):
             try:
                 subprocess.check_output("/usr/bin/{bin}/{bin}".format(bin=run_type) + " -version 2>/dev/null", shell=True)
-                cls.docker_run("/usr/bin/{bin}/{bin} -config /etc/{bin}/config.json > /.run.log &".format(bin=run_type), "start")
+                cls.docker_run("/usr/bin/{bin}/{bin} -config /etc/{bin}/config.json > /.run.log 2>&1 &".format(bin=run_type), "start")
             except:
-                cls.docker_run("/usr/bin/{bin}/{bin} run -c /etc/{bin}/config.json > /.run.log &".format(bin=run_type), "start")
+                cls.docker_run("/usr/bin/{bin}/{bin} run -c /etc/{bin}/config.json > /.run.log 2>&1 &".format(bin=run_type), "start")
         else:
             cls.run("systemctl start {}".format(run_type), "start")
 

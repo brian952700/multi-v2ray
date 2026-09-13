@@ -50,6 +50,8 @@ class Writer:
         '''
         with open(path, 'r') as json_file:
             config = json.load(json_file)
+        from .xray_compat import legacy_view
+        config = legacy_view(config)
         return config
 
     def load_template(self, template_name):
