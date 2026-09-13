@@ -309,7 +309,8 @@ def open_port(openport=-1):
         for port in port_set:
             iptables_open(iptable_way, str(port))
     # Keep the IPv4 legacy path while separating IPv6 snapshots on Debian.
-    snapshot = '/root/.ip6tables' if iptable_way == 'ip6tables' else '/root/.iptables'
+    separate_ipv6 = os.path.isfile('/opt/multi-v2ray/restore_iptables.sh')
+    snapshot = '/root/.ip6tables' if iptable_way == 'ip6tables' and separate_ipv6 else '/root/.iptables'
     os.system("{0}-save -c > {1}.tmp && mv {1}.tmp {1}".format(iptable_way, snapshot))
 
 def random_email():

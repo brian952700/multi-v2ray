@@ -19,6 +19,8 @@ bash /tmp/multi-v2ray-install.sh --zh
 
 已有节点请在最后一行追加 `--keep`，保留配置更新管理程序。首次安装沿用原行为，
 生成随机端口和 UUID。运行 `xray` 可以安装并管理独立的 Xray 核心。
+合并前不要运行 `update.sh` 子命令，它会更新到 master；测试分支的管理程序更新
+请重复上面的命令并追加 `--keep`。`v2ray update` / `xray update` 更新的是核心。
 
 ## Configuration migration / 配置迁移
 
