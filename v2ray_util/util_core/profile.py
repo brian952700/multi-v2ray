@@ -38,6 +38,8 @@ class Profile:
 
         with open(self.path, 'r') as json_file:
             self.config = json.load(json_file)
+        from .xray_compat import legacy_view
+        self.config = legacy_view(self.config)
 
         #读取配置文件大框架
         conf_inbounds = self.config["inbounds"]

@@ -8,7 +8,7 @@ import socket
 import string
 import random
 import termios
-import pkg_resources
+from v2ray_util.resources import resource_filename
 import urllib.request
 from enum import Enum, unique
 
@@ -96,9 +96,9 @@ def get_ip():
     """
     my_ip = ""
     try:
-        my_ip = urllib.request.urlopen('http://api.ipify.org').read()
+        my_ip = urllib.request.urlopen('https://api.ipify.org', timeout=10).read()
     except Exception:
-        my_ip = urllib.request.urlopen('http://icanhazip.com').read()
+        my_ip = urllib.request.urlopen('https://icanhazip.com', timeout=10).read()
     return bytes.decode(my_ip).strip()
 
 def port_is_use(port):
@@ -223,7 +223,7 @@ def gen_cert(domain, cert_type, email=""):
 
 def calcul_iptables_traffic(port, ipv6=False):
     network = "1" if ipv6 else ""
-    traffic_result = os.popen("bash {0} {1} {2}".format(pkg_resources.resource_filename("v2ray_util", "global_setting/calcul_traffic.sh"), str(port), network)).readlines()
+    traffic_result = os.popen("bash {0} {1} {2}".format(resource_filename("v2ray_util", "global_setting/calcul_traffic.sh"), str(port), network)).readlines()
     if traffic_result:
         traffic_list = traffic_result[0].split()
         upload_traffic = bytes_2_human_readable(int(traffic_list[0]), 2)
@@ -308,7 +308,10 @@ def open_port(openport=-1):
             os.system("{}-restore -c < /etc/sysconfig/iptables".format(iptable_way)) 
         for port in port_set:
             iptables_open(iptable_way, str(port))
-    os.system("{}-save -c > /root/.iptables 2>/dev/null".format(iptable_way))
+    # Keep the IPv4 legacy path while separating IPv6 snapshots on Debian.
+    separate_ipv6 = os.path.isfile('/opt/multi-v2ray/restore_iptables.sh')
+    snapshot = '/root/.ip6tables' if iptable_way == 'ip6tables' and separate_ipv6 else '/root/.iptables'
+    os.system("{0}-save -c > {1}.tmp && mv {1}.tmp {1}".format(iptable_way, snapshot))
 
 def random_email():
     domain = ['163', 'qq', 'sina', '126', 'gmail', 'outlook', 'icloud']

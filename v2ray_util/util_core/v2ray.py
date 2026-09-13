@@ -5,7 +5,9 @@ import sys
 import uuid
 import time
 import subprocess
-import pkg_resources
+import tempfile
+import urllib.request
+from v2ray_util.resources import resource_filename
 from functools import wraps
 from v2ray_util import run_type
 from .utils import ColorStr, open_port, get_ip, is_ipv6, random_port
@@ -36,6 +38,7 @@ class V2ray:
             print(ColorStr.green("{} {} success !".format(run_type, keyword)))
         else:
             print(ColorStr.red("{} {} fail !".format(run_type, keyword)))
+            raise RuntimeError('{} {} failed'.format(run_type, keyword))
 
     @staticmethod
     def run(command, keyword):
@@ -43,12 +46,15 @@ class V2ray:
             subprocess.check_output(command, shell=True)
             print("{}ing {}...".format(keyword, run_type))
             time.sleep(2)
-            if subprocess.check_output("systemctl is-active {}|grep active".format(run_type), shell=True) or keyword == "stop":
+            expected = 'inactive' if keyword == 'stop' else 'active'
+            state = subprocess.run(['systemctl', 'is-active', run_type], stdout=subprocess.PIPE, text=True).stdout.strip()
+            if state == expected:
                 print(ColorStr.green("{} {} success !".format(run_type, keyword)))
             else:
-                raise subprocess.CalledProcessError
+                raise subprocess.CalledProcessError(1, command)
         except subprocess.CalledProcessError:
             print(ColorStr.red("{} {} fail !".format(run_type, keyword)))
+            raise
 
     @staticmethod
     def docker_status():
@@ -89,16 +95,25 @@ class V2ray:
         if is_ipv6(get_ip()):
             print(ColorStr.yellow(_("ipv6 network not support update {soft} online, please manual donwload {soft} to update!".format(soft=run_type))))
             if run_type == "xray":
-                print(ColorStr.fuchsia(_("download Xray-linux-xx.zip and run 'bash <(curl -L -s https://multi.netlify.app/go.sh) -l Xray-linux-xx.zip -x' to update")))
+                print(ColorStr.fuchsia(_("download Xray-linux-xx.zip and run 'bash <(curl -L -s https://raw.githubusercontent.com/brian952700/multi-v2ray/master/go.sh) -l Xray-linux-xx.zip -x' to update")))
             else:
-                print(ColorStr.fuchsia(_("download v2ray-linux-xx.zip and run 'bash <(curl -L -s https://multi.netlify.app/go.sh) -l v2ray-linux-xx.zip' to update")))
+                print(ColorStr.fuchsia(_("download v2ray-linux-xx.zip and run 'bash <(curl -L -s https://raw.githubusercontent.com/brian952700/multi-v2ray/master/go.sh) -l v2ray-linux-xx.zip' to update")))
             sys.exit(0)
         if os.path.exists("/.dockerenv"):
             V2ray.stop()
-        subprocess.Popen("curl -Ls https://multi.netlify.app/go.sh -o temp.sh", shell=True).wait()
-        subprocess.Popen("bash temp.sh {} {} && rm -f temp.sh".format("-x" if run_type == "xray" else "", "--version {}".format(version) if version else ""), shell=True).wait()
-        if os.path.exists("/.dockerenv"):
-            V2ray.start()
+        with tempfile.TemporaryDirectory() as directory:
+            script = '/opt/multi-v2ray/go.sh'
+            if not os.path.isfile(script):
+                script = os.path.join(directory, 'go.sh')
+                urllib.request.urlretrieve('https://raw.githubusercontent.com/brian952700/multi-v2ray/master/go.sh', script)
+            command = ['bash', script]
+            if run_type == 'xray':
+                command.append('-x')
+            if version:
+                command.extend(['--version', str(version)])
+            subprocess.check_call(command)
+        if os.path.isfile('/etc/{}/config.json'.format(run_type)):
+            V2ray.restart()
 
     @staticmethod
     def cleanLog():
@@ -119,6 +134,9 @@ class V2ray:
 
     @classmethod
     def restart(cls):
+        if run_type == 'xray':
+            from .xray_compat import prepare_config
+            prepare_config()
         if os.path.exists("/.dockerenv"):
             V2ray.stop()
             V2ray.start()
@@ -127,26 +145,29 @@ class V2ray:
 
     @classmethod
     def start(cls):
+        if run_type == 'xray':
+            from .xray_compat import prepare_config
+            prepare_config()
         if os.path.exists("/.dockerenv"):
             try:
                 subprocess.check_output("/usr/bin/{bin}/{bin}".format(bin=run_type) + " -version 2>/dev/null", shell=True)
-                cls.docker_run("/usr/bin/{bin}/{bin} -config /etc/{bin}/config.json > /.run.log &".format(bin=run_type), "start")
+                cls.docker_run("/usr/bin/{bin}/{bin} -config /etc/{bin}/config.json > /.run.log 2>&1 &".format(bin=run_type), "start")
             except:
-                cls.docker_run("/usr/bin/{bin}/{bin} run -c /etc/{bin}/config.json > /.run.log &".format(bin=run_type), "start")
+                cls.docker_run("/usr/bin/{bin}/{bin} run -c /etc/{bin}/config.json > /.run.log 2>&1 &".format(bin=run_type), "start")
         else:
             cls.run("systemctl start {}".format(run_type), "start")
 
     @classmethod
     def stop(cls):
         if os.path.exists("/.dockerenv"):
-            cls.docker_run("ps aux|grep /usr/bin/{bin}/{bin}".format(bin=run_type) + "|awk '{print $1}'|xargs  -r kill -9 2>/dev/null", "stop")
+            cls.docker_run("pkill -TERM -f '^/usr/bin/{bin}/{bin}( |$)'".format(bin=run_type), "stop")
         else:
             cls.run("systemctl stop {}".format(run_type), "stop")
 
     @classmethod
     def check(cls):
         if not os.path.exists("/etc/v2ray_util/util.cfg"):
-            subprocess.call("mkdir -p /etc/v2ray_util && cp -f {} /etc/v2ray_util/".format(pkg_resources.resource_filename(__name__, 'util.cfg')), shell=True)
+            subprocess.call("mkdir -p /etc/v2ray_util && cp -f {} /etc/v2ray_util/".format(resource_filename(__name__, 'util.cfg')), shell=True)
         if not os.path.exists("/usr/bin/{bin}/{bin}".format(bin=run_type)):
             print(ColorStr.yellow(_("check {soft} no install, auto install {soft}..".format(soft=run_type))))
             cls.update()
@@ -165,7 +186,7 @@ class V2ray:
 
     @classmethod
     def new(cls):
-        subprocess.call("rm -rf /etc/{soft}/config.json && cp {package_path}/server.json /etc/{soft}/config.json".format(soft=run_type, package_path=pkg_resources.resource_filename('v2ray_util', "json_template")), shell=True)
+        subprocess.call("rm -rf /etc/{soft}/config.json && cp {package_path}/server.json /etc/{soft}/config.json".format(soft=run_type, package_path=resource_filename('v2ray_util', "json_template")), shell=True)
         new_uuid = uuid.uuid4()
         print("new UUID: {}".format(ColorStr.green(str(new_uuid))))
         new_port = random_port(1000, 65535)

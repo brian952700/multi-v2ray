@@ -50,6 +50,8 @@ class Writer:
         '''
         with open(path, 'r') as json_file:
             config = json.load(json_file)
+        from .xray_compat import legacy_view
+        config = legacy_view(config)
         return config
 
     def load_template(self, template_name):
@@ -64,6 +66,11 @@ class Writer:
         '''
         save v2ray config.json
         '''
+        from v2ray_util import run_type
+        if run_type == 'xray':
+            from .xray_compat import prepare_config
+            prepare_config(self.path, self.config)
+            return
         json_dump=json.dumps(self.config, indent=2)
         with open(self.path, 'w') as writer:
             writer.writelines(json_dump)

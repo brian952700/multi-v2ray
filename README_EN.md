@@ -1,4 +1,6 @@
 # multi-v2ray
+
+See [Debian 13 compatibility](DEBIAN13.md) for installation, legacy configuration migration and test coverage.
 a tool to manage v2ray/xray config json, support multiple user && group manage  
 ![](https://img.shields.io/pypi/v/v2ray-util.svg) 
 [![Downloads](https://pepy.tech/badge/v2ray-util)](https://pepy.tech/project/v2ray-util)
@@ -45,17 +47,17 @@ a tool to manage v2ray/xray config json, support multiple user && group manage
 ## How To Use
 new install
 ```
-source <(curl -sL https://multi.netlify.app/v2ray.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/brian952700/multi-v2ray/master/v2ray.sh)
 ```
 
 keep profile to update
 ```
-source <(curl -sL https://multi.netlify.app/v2ray.sh) -k
+bash <(curl -fsSL https://raw.githubusercontent.com/brian952700/multi-v2ray/master/v2ray.sh) -k
 ```
 
 uninstall
 ```
-source <(curl -sL https://multi.netlify.app/v2ray.sh) --remove
+bash <(curl -fsSL https://raw.githubusercontent.com/brian952700/multi-v2ray/master/v2ray.sh) --remove
 ```
 
 ## Command Line

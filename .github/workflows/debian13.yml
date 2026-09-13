@@ -1,0 +1,229 @@
+name: Debian 13 compatibility
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    name: Debian 13 / ${{ matrix.scenario }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [source, installer-keep, core-v2ray, core-xray]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Test in an isolated Debian 13 container
+        shell: bash
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          docker pull debian:13
+          docker image inspect debian:13 > test-results/image.json
+          cat > test-results/test.sh <<'BASH'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          trap 'test ! -f /.run.log || cat /.run.log' ERR
+          cat /etc/os-release
+          . /etc/os-release
+          test "$VERSION_ID" = 13
+          apt-get update
+          apt-get install -y ca-certificates curl python3 python3-pip python3-venv
+          python3 --version
+          python3 -c 'import sys; assert sys.version_info[:2] == (3, 13)'
+          cp -a /source /tmp/project
+          cd /tmp/project
+          bash -n v2ray.sh
+          bash -n go.sh
+
+          if [ "$SCENARIO" = source ]; then
+            # Install this checkout, not the independently published PyPI package.
+            python3 -m venv /opt/test-venv
+            export PATH="/opt/test-venv/bin:$PATH"
+            python -m pip install --upgrade pip setuptools wheel
+            python -m pip install --no-build-isolation .
+            python -m pip check
+            cd /tmp
+            python -m compileall -q /opt/test-venv/lib/python3.13/site-packages/v2ray_util
+            python - <<'PY'
+          import importlib.metadata
+          import json
+          import pathlib
+          import shutil
+          import uuid
+          from unittest.mock import patch
+          import v2ray_util
+          import v2ray_util.main as main
+          from v2ray_util.util_core.v2ray import V2ray
+          from v2ray_util.util_core.config import Config
+
+          package = pathlib.Path(v2ray_util.__file__).parent
+          assert '/opt/test-venv/' in str(package), package
+          print('Installed package:', package)
+          print('Version:', importlib.metadata.version('v2ray-util'))
+          pathlib.Path('/etc/v2ray_util').mkdir(parents=True, exist_ok=True)
+          shutil.copyfile(package / 'util_core/util.cfg', '/etc/v2ray_util/util.cfg')
+          pathlib.Path('/etc/v2ray').mkdir(parents=True, exist_ok=True)
+          assert Config().get_path('config_path') == '/etc/v2ray/config.json'
+          main.help()
+          # Exercise real template/configuration code. Network/firewall and service
+          # operations are excluded: a normal container does not boot systemd.
+          with patch('v2ray_util.util_core.v2ray.open_port'), patch.object(V2ray, 'restart'):
+              V2ray.new()
+          config = json.loads(pathlib.Path('/etc/v2ray/config.json').read_text())
+          assert config.get('outbounds'), 'Missing outbounds'
+          clients = []
+          for inbound in config['inbounds']:
+              if inbound.get('protocol') == 'vmess':
+                  assert 1000 <= int(inbound['port']) <= 65535
+                  clients.extend(inbound['settings']['clients'])
+          assert clients, 'No generated VMess clients'
+          for client in clients:
+              uuid.UUID(client['id'])
+              assert client['id'] != 'cc4f8d5b-967b-4557-a4b6-bde92965bc27'
+          print('PASS: installed checkout, imports, help and configuration generation')
+          PY
+            python /source/tests/test_features.py -v
+            python /source/tests/test_xray_compat.py -v
+          elif [ "$SCENARIO" = installer-keep ]; then
+            # Install this checkout and verify keep-mode configuration preservation.
+            timeout 600 bash ./v2ray.sh --keep --zh
+            test -x /usr/local/bin/v2ray
+            test -x /usr/local/bin/xray
+            test -s /etc/v2ray_util/util.cfg
+            /opt/multi-v2ray/venv/bin/python3 -m pip check
+            cd /tmp
+            /opt/multi-v2ray/venv/bin/python3 - <<'PY'
+          import importlib.metadata
+          import v2ray_util.main as main
+          from v2ray_util.util_core.config import Config
+          assert Config().get_data('lang') == 'zh'
+          print('Installed checkout version:', importlib.metadata.version('v2ray-util'))
+          main.help()
+          print('PASS: keep-mode installer postconditions and installed-package import')
+          PY
+            mkdir -p /etc/v2ray /etc/xray
+            printf '{"keep": "v2ray"}\n' > /etc/v2ray/config.json
+            printf '{"keep": "xray"}\n' > /etc/xray/config.json
+            sha256sum /etc/v2ray/config.json /etc/xray/config.json > /tmp/config.sha256
+            cd /tmp/project
+            timeout 600 bash ./v2ray.sh --keep
+            sha256sum --check /tmp/config.sha256
+          else
+            core="${SCENARIO#core-}"
+            timeout 600 bash ./v2ray.sh --keep --zh
+            if [ "$core" = xray ]; then
+              bash ./go.sh -x
+            else
+              bash ./go.sh
+            fi
+            export PATH="/opt/multi-v2ray/venv/bin:$PATH"
+            cd /tmp
+            timeout 60 /usr/local/bin/"$core" new
+            if [ "$core" = xray ]; then
+              /usr/bin/xray/xray run -test -c /etc/xray/config.json
+            else
+              /usr/bin/v2ray/v2ray test -c /etc/v2ray/config.json
+            fi
+            pgrep -f "^/usr/bin/$core/$core( |$)"
+            timeout 30 /usr/local/bin/"$core" restart
+            pgrep -f "^/usr/bin/$core/$core( |$)"
+            timeout 30 /usr/local/bin/"$core" info
+            python /source/tests/proxy_smoke.py "$core"
+            timeout 30 /usr/local/bin/"$core" stop
+            if pgrep -f "^/usr/bin/$core/$core( |$)"; then
+              echo 'Core still running after stop'; exit 1
+            fi
+          fi
+          BASH
+          docker run --rm --cap-add NET_ADMIN --name "debian13-${SCENARIO}-${GITHUB_RUN_ID}" \
+            --env SCENARIO \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/source,readonly" \
+            debian:13 bash /source/test-results/test.sh \
+            2>&1 | tee "test-results/${SCENARIO}.log"
+
+      - name: Preserve diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian13-${{ matrix.scenario }}-${{ github.run_attempt }}
+          path: test-results/
+          retention-days: 14
+
+      - name: Explain coverage
+        if: always()
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          Debian 13 amd64 container checks; Python version and image digest are logged.
+
+          - source: installs the current checkout in a venv; checks imports, help and generated JSON/UUID/ports.
+          - installer-keep: installs this checkout twice and verifies both core configurations remain unchanged.
+          - core-v2ray/core-xray: install latest stable cores, validate generated configurations, exercise start/restart/stop and real proxy traffic.
+          - systemd: separate Debian container boots systemd, installs both cores, checks service lifecycle, firewall restoration, container restart and uninstall.
+          - External dependency versions are unpinned intentionally; failures may reflect upstream changes or network errors. Inspect logs.
+          - NOT covered: a real VPS kernel reboot, every external client, provider firewalls, certificate issuance or every protocol combination.
+          - Configuration generation mocks only firewall opening and service restart; passing is not a full Debian 13 certification.
+          EOF
+
+  systemd:
+    name: Debian 13 / systemd integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Boot isolated Debian systemd and exercise installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          cat > test-results/Dockerfile <<'EOF'
+          FROM debian:13
+          ENV DEBIAN_FRONTEND=noninteractive
+          RUN apt-get update && apt-get install -y systemd systemd-sysv dbus curl ca-certificates
+          STOPSIGNAL SIGRTMIN+3
+          CMD ["/bin/bash", "-c", "rm -f /.dockerenv; exec /sbin/init"]
+          EOF
+          docker build -t multi-v2ray-systemd -f test-results/Dockerfile .
+          docker run -d --name debian13-systemd --privileged --cgroupns=private \
+            --tmpfs /run --tmpfs /run/lock --env container=docker \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/source,readonly" multi-v2ray-systemd
+          for attempt in $(seq 1 30); do
+            if docker exec debian13-systemd test -d /run/systemd/system; then break; fi
+            sleep 1
+          done
+          docker exec debian13-systemd bash /source/tests/systemd.sh 2>&1 | tee test-results/systemd.log
+          docker restart debian13-systemd
+          for attempt in $(seq 1 30); do
+            if docker exec debian13-systemd systemctl is-active --quiet v2ray xray multi-v2ray-iptables; then break; fi
+            sleep 1
+          done
+          docker exec debian13-systemd systemctl is-active --quiet v2ray xray multi-v2ray-iptables
+          docker exec debian13-systemd bash -c 'cd /opt/test-project && bash v2ray.sh --remove && test ! -e /opt/multi-v2ray && test ! -e /usr/local/bin/v2ray && test ! -e /usr/local/bin/xray'
+      - name: Save systemd diagnostics and remove test container
+        if: always()
+        shell: bash
+        run: |
+          docker logs debian13-systemd > test-results/boot.log 2>&1 || true
+          docker exec debian13-systemd journalctl --no-pager -n 200 > test-results/journal.log 2>&1 || true
+          docker rm -f debian13-systemd || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: debian13-systemd-${{ github.run_attempt }}
+          path: test-results/
+          retention-days: 14

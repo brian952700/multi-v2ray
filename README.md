@@ -62,18 +62,20 @@ V2ray/Xray多用户管理脚本，向导式管理[新增|删除|修改]传输协
   - Trojan
 
 ## 安装命令
+Debian 13 的安装说明、旧协议迁移和测试范围见 [DEBIAN13.md](DEBIAN13.md)。
+
 ```
-source <(curl -sL https://multi.netlify.app/v2ray.sh) --zh
+bash <(curl -fsSL https://raw.githubusercontent.com/brian952700/multi-v2ray/master/v2ray.sh) --zh
 ```
 
 ## 升级命令(保留配置文件更新)
 ```
-source <(curl -sL https://multi.netlify.app/v2ray.sh) -k
+bash <(curl -fsSL https://raw.githubusercontent.com/brian952700/multi-v2ray/master/v2ray.sh) -k
 ```
 
 ## 卸载命令
 ```
-source <(curl -sL https://multi.netlify.app/v2ray.sh) --remove
+bash <(curl -fsSL https://raw.githubusercontent.com/brian952700/multi-v2ray/master/v2ray.sh) --remove
 ```
 
 ## 命令行参数

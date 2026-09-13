@@ -72,11 +72,12 @@ def help():
         """.format(exec_name[exec_name.rfind("/") + 1:], bin=run_type))
 
 def updateSh():
-    if os.path.exists("/.dockerenv"):
-        subprocess.Popen("pip install -U v2ray_util", shell=True).wait()
-    else:
-        subprocess.Popen("curl -Ls https://multi.netlify.app/v2ray.sh -o temp.sh", shell=True).wait()
-        subprocess.Popen("bash temp.sh -k && rm -f temp.sh", shell=True).wait()
+    import tempfile
+    import urllib.request
+    with tempfile.TemporaryDirectory() as directory:
+        script = os.path.join(directory, "v2ray.sh")
+        urllib.request.urlretrieve("https://raw.githubusercontent.com/brian952700/multi-v2ray/master/v2ray.sh", script)
+        subprocess.check_call(["bash", script, "-k"])
 
 def parse_arg():
     if len(sys.argv) == 1:

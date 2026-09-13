@@ -13,7 +13,48 @@ help=0
 remove=0
 chinese=0
 
-base_source_path="https://multi.netlify.app"
+# Keep installer and Python sources together, including when used from a checkout.
+source_repo="${MULTI_V2RAY_REPOSITORY:-brian952700/multi-v2ray}"
+source_ref="${MULTI_V2RAY_REF:-master}"
+base_source_path="https://raw.githubusercontent.com/${source_repo}/${source_ref}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+manager_home="/opt/multi-v2ray"
+venv_path="$manager_home/venv"
+source_dir=""
+source_tmp=""
+is_debian=0
+
+prepare_source() {
+    if [[ -f "$script_dir/setup.py" && -d "$script_dir/v2ray_util" ]]; then
+        source_dir="$script_dir"
+    else
+        source_tmp="$(mktemp -d)" || return 1
+        if ! curl -fLsS --retry 3 "https://api.github.com/repos/${source_repo}/tarball/${source_ref}" -o "$source_tmp/source.tar.gz"; then
+            rm -rf -- "$source_tmp"
+            return 1
+        fi
+        mkdir "$source_tmp/source" || return 1
+        tar -xzf "$source_tmp/source.tar.gz" --strip-components=1 -C "$source_tmp/source" || return 1
+        source_dir="$source_tmp/source"
+    fi
+    [[ -f "$source_dir/setup.py" && -f "$source_dir/go.sh" ]]
+}
+
+core_script() {
+    if [[ -n "$source_dir" ]]; then
+        bash "$source_dir/go.sh" "$@"
+    elif [[ -f "$manager_home/go.sh" ]]; then
+        bash "$manager_home/go.sh" "$@"
+    else
+        local core_tmp
+        core_tmp="$(mktemp)" || return 1
+        curl -fLsS --retry 3 "$base_source_path/go.sh" -o "$core_tmp" || { rm -f "$core_tmp"; return 1; }
+        bash "$core_tmp" "$@"
+        local result=$?
+        rm -f "$core_tmp"
+        return "$result"
+    fi
+}
 
 util_path="/etc/v2ray_util/util.cfg"
 util_cfg="$base_source_path/v2ray_util/util_core/util.cfg"
@@ -38,7 +79,10 @@ colorEcho() {
 }
 
 get_pip_cmd() {
-    if command -v pip >/dev/null 2>&1; then
+    if [[ -x "$venv_path/bin/pip" ]]; then
+        echo "$venv_path/bin/pip"
+        return 0
+    elif command -v pip >/dev/null 2>&1; then
         echo "pip"
         return 0
     elif command -v pip3 >/dev/null 2>&1; then
@@ -61,6 +105,7 @@ find_v2ray_util_bin() {
     fi
 
     for bin_path in \
+        "$venv_path/bin/v2ray-util" \
         /usr/local/bin/v2ray-util \
         /usr/bin/v2ray-util \
         /root/.local/bin/v2ray-util
@@ -113,17 +158,22 @@ removeV2Ray() {
     local pip_cmd rc_service rc_file
 
     # 卸载V2ray脚本
-    bash <(curl -L -s https://multi.netlify.app/go.sh) --remove >/dev/null 2>&1
+    core_script --remove || return 1
     rm -rf /etc/v2ray >/dev/null 2>&1
     rm -rf /var/log/v2ray >/dev/null 2>&1
 
     # 卸载Xray脚本
-    bash <(curl -L -s https://multi.netlify.app/go.sh) --remove -x >/dev/null 2>&1
+    core_script --remove -x || return 1
     rm -rf /etc/xray >/dev/null 2>&1
     rm -rf /var/log/xray >/dev/null 2>&1
 
     # 清理v2ray相关iptable规则
-    bash <(curl -L -s "$clean_iptables_shell")
+    if [[ -f "$manager_home/clean_iptables.sh" ]]; then
+        bash "$manager_home/clean_iptables.sh"
+    fi
+    systemctl disable --now multi-v2ray-iptables.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/multi-v2ray-iptables.service
+    systemctl daemon-reload >/dev/null 2>&1 || true
 
     # 卸载multi-v2ray
     pip_cmd="$(get_pip_cmd 2>/dev/null)"
@@ -142,6 +192,8 @@ removeV2Ray() {
     rm -rf /etc/v2ray_util >/dev/null 2>&1
     rm -rf /etc/profile.d/iptables.sh >/dev/null 2>&1
     rm -rf /root/.iptables >/dev/null 2>&1
+    rm -f /root/.ip6tables
+    rm -rf /opt/multi-v2ray
 
     # 删除v2ray定时更新任务
     crontab -l 2>/dev/null | sed '/SHELL=/d;/v2ray/d;/xray/d' > crontab.txt
@@ -180,6 +232,12 @@ checkSys() {
     # 检查是否为Root
     [[ "$(id -u)" != "0" ]] && { colorEcho "${red}" "Error: You must be root to run this script"; exit 1; }
 
+    if [[ -r /etc/os-release ]]; then
+        local ID="" ID_LIKE=""
+        . /etc/os-release
+        [[ "$ID" == debian || "$ID_LIKE" == *debian* ]] && is_debian=1
+    fi
+
     if command -v apt-get >/dev/null 2>&1; then
         package_manager='apt-get'
     elif command -v dnf >/dev/null 2>&1; then
@@ -197,12 +255,22 @@ installDependent() {
     if [[ ${package_manager} == 'dnf' || ${package_manager} == 'yum' ]]; then
         ${package_manager} install socat crontabs bash-completion which -y
     else
-        ${package_manager} update -y
-        ${package_manager} install socat cron bash-completion ntpdate gawk curl ca-certificates -y
+        ${package_manager} update -y || return 1
+        local ntp_package=ntpdate
+        if apt-cache show ntpsec-ntpdate >/dev/null 2>&1; then
+            ntp_package=ntpsec-ntpdate
+        fi
+        ${package_manager} install socat cron bash-completion "$ntp_package" gawk curl ca-certificates iptables procps unzip tar -y || return 1
     fi
 
     # install python3 & pip
-    source <(curl -sL https://python3.netlify.app/install.sh)
+    if [[ $is_debian == 1 ]]; then
+        apt-get install -y python3 python3-venv || return 1
+        mkdir -p "$manager_home" || return 1
+        python3 -m venv "$venv_path" || return 1
+    else
+        source <(curl -fsSL https://python3.netlify.app/install.sh)
+    fi
 }
 
 updateProject() {
@@ -217,7 +285,7 @@ updateProject() {
     rc_file=""
     [[ -n "$rc_service" && -f "$rc_service" ]] && rc_file="$(grep ExecStart "$rc_service" | awk '{print $1}' | cut -d = -f2)"
 
-    if [[ -n "$rc_file" ]]; then
+    if [[ $is_debian != 1 && -n "$rc_file" ]]; then
         if [[ ! -e "$rc_file" || -z "$(grep iptables "$rc_file" 2>/dev/null)" ]]; then
             local_ip="$(curl -s http://api.ipify.org 2>/dev/null)"
             [[ "$(echo "$local_ip" | grep :)" ]] && iptable_way="ip6tables" || iptable_way="iptables"
@@ -244,29 +312,49 @@ EOF
         fi
     fi
 
-    # Debian 12 兼容：优先尝试正常安装，失败再尝试 break-system-packages
-    $pip_cmd install -U v2ray_util >/dev/null 2>&1 && pip_install_ok=1
-
-    if [[ $pip_install_ok -ne 1 ]]; then
-        if [[ "$pip_cmd" == "pip" || "$pip_cmd" == "pip3" ]]; then
-            $pip_cmd install -U v2ray_util --break-system-packages >/dev/null 2>&1 && pip_install_ok=1
-        else
-            python3 -m pip install -U v2ray_util --break-system-packages >/dev/null 2>&1 && pip_install_ok=1
+    # Install this source revision into the dedicated Debian environment.
+    $pip_cmd install --upgrade "$source_dir" || return 1
+    local manager_python
+    if [[ $is_debian == 1 ]]; then
+        manager_python="$venv_path/bin/python3"
+    else
+        manager_python="$(dirname "$(find_v2ray_util_bin)")/python3"
+    fi
+    [[ -x "$manager_python" ]] || manager_python=python3
+    # Existing configuration remains in place during --keep.
+    "$manager_python" -c 'import v2ray_util.main' || return 1
+    mkdir -p "$manager_home" || return 1
+    cp "$source_dir/go.sh" "$manager_home/go.sh" || return 1
+    cp "$source_dir/v2ray_util/global_setting/clean_iptables.sh" "$manager_home/clean_iptables.sh" || return 1
+    if [[ $is_debian == 1 ]]; then
+        cp "$source_dir/v2ray_util/global_setting/restore_iptables.sh" "$manager_home/restore_iptables.sh" || return 1
+        if [[ -f /root/.iptables ]] && grep -q 'Generated by ip6tables-save' /root/.iptables; then
+            mv /root/.iptables /root/.ip6tables || return 1
+        fi
+        # Debian no longer guarantees an enabled rc-local service. Do not edit
+        # the distribution's unit or mix the two address families in one file.
+        if [[ -d /run/systemd/system ]]; then
+            cp "$source_dir/multi-v2ray-iptables.service" /etc/systemd/system/ || return 1
+            systemctl daemon-reload || return 1
+            systemctl enable multi-v2ray-iptables.service || return 1
+            systemctl enable --now cron || return 1
         fi
     fi
-
-    [[ $pip_install_ok -ne 1 ]] && colorEcho "${red}" "v2ray_util install failed!" && exit 1
 
     if [[ -e "$util_path" ]]; then
         [[ -z "$(grep lang "$util_path" 2>/dev/null)" ]] && echo "lang=en" >> "$util_path"
     else
         mkdir -p /etc/v2ray_util
-        curl -L -s "$util_cfg" > "$util_path"
+        cp "$source_dir/v2ray_util/util_core/util.cfg" "$util_path" || return 1
     fi
 
     [[ $chinese == 1 ]] && sed -i "s/lang=en/lang=zh/g" "$util_path"
 
-    v2ray_util_bin="$(find_v2ray_util_bin)"
+    if [[ $is_debian == 1 ]]; then
+        v2ray_util_bin="$venv_path/bin/v2ray-util"
+    else
+        v2ray_util_bin="$(find_v2ray_util_bin)"
+    fi
     [[ -z "$v2ray_util_bin" ]] && colorEcho "${red}" "v2ray-util command not found after install!" && exit 1
 
     rm -f /usr/local/bin/v2ray >/dev/null 2>&1
@@ -284,8 +372,8 @@ EOF
     [[ -e /usr/share/bash-completion/completions/v2ray.bash ]] && rm -f /usr/share/bash-completion/completions/v2ray.bash
 
     # 更新v2ray bash_completion脚本
-    curl -L -s "$bash_completion_shell" > /usr/share/bash-completion/completions/v2ray
-    curl -L -s "$bash_completion_shell" > /usr/share/bash-completion/completions/xray
+    cp "$source_dir/v2ray" /usr/share/bash-completion/completions/v2ray || return 1
+    cp "$source_dir/v2ray" /usr/share/bash-completion/completions/xray || return 1
 
     if [[ -z "$(echo "$SHELL" | grep zsh)" ]]; then
         source /usr/share/bash-completion/completions/v2ray >/dev/null 2>&1
@@ -293,7 +381,10 @@ EOF
     fi
 
     # 安装V2ray主程序
-    [[ ${install_way} == 0 ]] && bash <(curl -L -s https://multi.netlify.app/go.sh)
+    if [[ ${install_way} == 0 ]]; then
+        core_script || return 1
+    fi
+    return 0
 }
 
 # 时间同步
@@ -321,7 +412,9 @@ profileInit() {
     [[ -f ~/"$env_file" && -z "$(grep PYTHONIOENCODING=utf-8 ~/"$env_file" 2>/dev/null)" ]] && echo "export PYTHONIOENCODING=utf-8" >> ~/"$env_file" && source ~/"$env_file" >/dev/null 2>&1
 
     # 全新安装的新配置
-    [[ ${install_way} == 0 ]] && v2ray new
+    if [[ ${install_way} == 0 ]]; then
+        v2ray new || return 1
+    fi
 
     echo ""
 }
@@ -343,16 +436,18 @@ installFinish() {
 
 main() {
     [[ ${help} == 1 ]] && help && return
-    [[ ${remove} == 1 ]] && removeV2Ray && return
+    checkSys
+    [[ ${remove} == 1 ]] && { removeV2Ray; return $?; }
 
     [[ ${install_way} == 0 ]] && colorEcho "${blue}" "new install\n"
 
-    checkSys
-    installDependent
+    installDependent || return 1
+    prepare_source || return 1
     closeSELinux
     timeSync
-    updateProject
-    profileInit
+    updateProject || { [[ -n "$source_tmp" ]] && rm -rf -- "$source_tmp"; return 1; }
+    profileInit || return 1
+    [[ -n "$source_tmp" ]] && rm -rf -- "$source_tmp"
     installFinish
 }
 

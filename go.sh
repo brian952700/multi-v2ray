@@ -194,7 +194,7 @@ downloadV2Ray(){
     [[ $key == "Xray" ]] && pack_name=$key
     download_link="https://github.com/$repos/releases/download/${new_ver}/${pack_name}-linux-${machine}.zip"
     colorEcho ${blue} "Downloading $key: ${download_link}"
-    curl ${proxy} -L -H "Cache-Control: no-cache" -o ${zipfile} ${download_link}
+    curl ${proxy} -fL --retry 3 -H "Cache-Control: no-cache" -o ${zipfile} ${download_link}
     if [ $? != 0 ];then
         colorEcho ${red} "Failed to download! Please check your network or try again."
         return 3
@@ -378,12 +378,12 @@ EOF
 
 
 installInitScript(){
-    if [[ -e /.dockerenv ]]; then
+    if [[ -e /.dockerenv && ! -d /run/systemd/system ]]; then
         if [[ $key_lower == "v2ray" ]];then
             if [[ ${new_ver} =~ "v4" ]];then
-                sed -i "s/run -c/-config/g" /root/run.sh
+                [[ ! -f /root/run.sh ]] || sed -i "s/run -c/-config/g" /root/run.sh
             else
-                sed -i "s/-config/run -c/g" /root/run.sh
+                [[ ! -f /root/run.sh ]] || sed -i "s/-config/run -c/g" /root/run.sh
             fi
         fi
         return
@@ -406,7 +406,8 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 EOF
-        systemctl enable $key_lower.service
+        systemctl daemon-reload || return 1
+        systemctl enable $key_lower.service || return 1
     fi
     if [[ $key_lower == "v2ray" ]];then
         local modify_service=0
@@ -526,8 +527,8 @@ main(){
         fi
     fi
 
-    local ziproot="$(zipRoot "${zipfile}")"
     installSoftware unzip || return $?
+    local ziproot="$(zipRoot "${zipfile}")"
 
     if [ -n "${extract_only}" ]; then
         colorEcho ${blue} "Extracting $key package to ${vsrc_root}."
